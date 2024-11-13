@@ -3,3 +3,14 @@
 /unitraj/outputs/
 /unitraj/tmp
 .DS_Store
+build
+unitraj/models/__pycache__
+__pycache__/
+.vscode/launch.json
+outputs/
+UniTraj.egg-info/top_level.txt
+UniTraj.egg-info/SOURCES.txt
+UniTraj.egg-info/PKG-INFO
+UniTraj.egg-info/dependency_links.txt
+unitraj/models/mtr/ops/knn/knn_cuda.cpython-38-x86_64-linux-gnu.so
+unitraj/models/mtr/ops/attention/attention_cuda.cpython-38-x86_64-linux-gnu.so
