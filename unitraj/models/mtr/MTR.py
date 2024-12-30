@@ -15,12 +15,19 @@ from easydict import EasyDict
 import unitraj.models.mtr.loss_utils as loss_utils
 import unitraj.models.mtr.motion_utils as motion_utils
 from unitraj.models.base_model.base_model import BaseModel
-from unitraj.models.mtr.MTR_utils import PointNetPolylineEncoder, get_batch_offsets, build_mlps
+from unitraj.models.mtr.MTR_utils import PoseEncoder, PointNetPolylineEncoder, get_batch_offsets, build_mlps
 from unitraj.models.mtr.ops.knn import knn_utils
 from unitraj.models.mtr.transformer import transformer_decoder_layer, position_encoding_utils, \
     transformer_encoder_layer
 
+import sys
+import os
+sys.path.append('/home/erik/gitprojects/TokenHMR')
+#from tokenhmr.lib.models import load_tokenhmr
+
 Type_dict = {0: 'UNSET', 1: 'VEHICLE', 2: 'PEDESTRIAN', 3: 'CYCLIST'}
+feature_sizes = {'smpl': 9+(9*23)+10, '3d': 44*3, '2d': 44*2}
+feature_names = {'smpl': ['global_orientation', 'body_pose', 'beta'], '3d': ['keypoints_3d'], '2d': ['keypoints_2d']}
 
 
 class MotionTransformer(BaseModel):
@@ -36,10 +43,46 @@ class MotionTransformer(BaseModel):
         self.model_cfg.MOTION_DECODER['OBJECT_TYPE'] = self.model_cfg['object_type']
 
         self.context_encoder = MTREncoder(self.model_cfg.CONTEXT_ENCODER)
+        # Load JEPA encoder weights:
+        self.jepa_weights = self.model_cfg.CONTEXT_ENCODER.get('JEPA_WEIGHTS', None)
+        self.freeze = self.model_cfg.CONTEXT_ENCODER.get('FREEZE', False)
+        self.layers_for_probing = self.model_cfg.CONTEXT_ENCODER.get('LAYERS_FOR_PROBING', False)
+        if self.jepa_weights is not None:
+            # TODO: Check if dictionary is correct
+            self.load_encoder_params_from_file(self.jepa_weights, None, to_cpu=True)
+            if self.freeze:
+                for p in self.context_encoder.parameters():
+                    p.requires_grad = False
+            if self.layers_for_probing:
+                for p in self.context_encoder.self_attn_layers[-1].parameters():
+                    p.requires_grad = True
+                for p in self.context_encoder.self_attn_layers[-2].parameters():
+                    p.requires_grad = True
         self.motion_decoder = MTRDecoder(
             in_channels=self.context_encoder.num_out_channels,
             config=self.model_cfg.MOTION_DECODER
         )
+
+    
+    def load_encoder_params_from_file(self, ckpt_path, logger, to_cpu=False):
+        if not os.path.isfile(ckpt_path):
+            raise FileNotFoundError
+        
+        loc_type = torch.device('cpu') if to_cpu else None
+        checkpoint = torch.load(ckpt_path, map_location=loc_type, weights_only=True)
+        complete_model_state = checkpoint['model_state']
+
+        # Filter out state_dict of context_encoder weights:
+        encoder_dict = dict()
+        for k,v in complete_model_state.items():
+            if 'context_encoder.agent_polyline_encoder' in k or 'context_encoder.map_polyline_encoder' in k or 'context_encoder.self_attn_layers' in k:
+                encoder_dict[k.replace('context_encoder.', '')] = v
+            elif 'context_encoder.attention_pooling' in k and self.model_cfg.CONTEXT_ENCODER.get('USE_ATTN_POOL', False):
+                encoder_dict[k.replace('context_encoder.', '')] = v
+            else:
+                continue
+        self.context_encoder.load_state_dict(encoder_dict, strict=True)
+
 
     def forward(self, batch):
         enc_dict = self.context_encoder(batch)
@@ -78,6 +121,10 @@ class MotionTransformer(BaseModel):
 
         scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lbmd, last_epoch=-1, verbose=True)
         return [optimizer], [scheduler]
+    
+    def lr_scheduler_step(self, scheduler, optimizer_idx, metric):
+        #scheduler.step(self.current_epoch)
+        scheduler.step()
 
 
 class MTREncoder(nn.Module):
@@ -99,6 +146,20 @@ class MTREncoder(nn.Module):
             num_pre_layers=self.model_cfg.NUM_LAYER_IN_PRE_MLP_MAP,
             out_channels=self.model_cfg.D_MODEL
         )
+        if self.model_cfg.get('USE_POSES', False):
+            self.feature_type = self.model_cfg.get('FEATURE_TYPE', 'smpl')
+            self.agent_pose_encoder = self.build_pose_encoder(
+                in_channels=feature_sizes[self.feature_type],
+                hidden_dim=self.model_cfg.NUM_CHANNEL_IN_MLP_AGENT,
+                num_layers=self.model_cfg.NUM_LAYER_IN_MLP_AGENT,
+                out_channels=self.model_cfg.D_MODEL,
+            )
+            self.fusion_module = build_mlps(
+                c_in=self.model_cfg.D_MODEL * 2,
+                mlp_channels=[self.model_cfg.D_MODEL * 2, self.model_cfg.D_MODEL * 2, self.model_cfg.D_MODEL],
+                ret_before_act=True,
+                without_norm=True
+            )
 
         # build transformer encoder layers
         self.use_local_attn = self.model_cfg.get('USE_LOCAL_ATTN', False)
@@ -114,6 +175,19 @@ class MTREncoder(nn.Module):
 
         self.self_attn_layers = nn.ModuleList(self_attn_layers)
         self.num_out_channels = self.model_cfg.D_MODEL
+
+
+    def build_pose_encoder(self, in_channels, hidden_dim, num_layers, num_pre_layers=1, out_channels=None, time_encoder='rnn'):
+        ret_pose_encoder = PoseEncoder(
+            in_channels=in_channels,
+            hidden_dim=hidden_dim,
+            num_layers=num_layers,
+            num_pre_layers=num_pre_layers,
+            out_channels=out_channels,
+            time_encoder=time_encoder,
+        )
+        return ret_pose_encoder
+
 
     def build_polyline_encoder(self, in_channels, hidden_dim, num_layers, num_pre_layers=1, out_channels=None):
         ret_polyline_encoder = PointNetPolylineEncoder(
@@ -235,7 +309,7 @@ class MTREncoder(nn.Module):
                                                             obj_trajs_mask)  # (num_center_objects, num_objects, C)
         map_polylines_feature = self.map_polyline_encoder(map_polylines,
                                                           map_polylines_mask)  # (num_center_objects, num_polylines, C)
-
+            
         # apply self-attn
         obj_valid_mask = (obj_trajs_mask.sum(dim=-1) > 0)  # (num_center_objects, num_objects)
         map_valid_mask = (map_polylines_mask.sum(dim=-1) > 0)  # (num_center_objects, num_polylines)
@@ -260,6 +334,27 @@ class MTREncoder(nn.Module):
 
         # organize return features
         center_objects_feature = obj_polylines_feature[torch.arange(num_center_objects), track_index_to_predict]
+
+        # Encode poses and fuse them with other agent attributes
+        if self.model_cfg.get('USE_POSES', False):
+            used_feature_names = []
+            for feature_name in feature_names[self.feature_type]:
+                feature_shape = input_dict[feature_name].shape
+                used_feature_names.append(input_dict[feature_name].view(feature_shape[0], feature_shape[1], -1))
+            obj_poses = torch.cat(used_feature_names, dim=-1)
+            obj_poses_mask = input_dict['sequence_mask']
+            invalid_samples = torch.all(~(obj_poses_mask==1.0), dim=1)
+            valid_samples = ~invalid_samples
+            all_invalid = torch.all(invalid_samples)
+            if ~all_invalid:
+                obj_poses = obj_poses[valid_samples]
+                obj_poses_features = self.agent_pose_encoder(obj_poses)
+                valid_center_objects_feature = center_objects_feature[valid_samples]
+                concatenated_features = torch.cat((valid_center_objects_feature, obj_poses_features), dim=-1)
+                center_objects_feature[valid_samples] = self.fusion_module(
+                    concatenated_features
+                )
+                obj_polylines_feature[torch.arange(num_center_objects), track_index_to_predict] = center_objects_feature
 
         batch_dict['center_objects_feature'] = center_objects_feature
         batch_dict['obj_feature'] = obj_polylines_feature

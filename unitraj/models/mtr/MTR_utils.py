@@ -97,3 +97,48 @@ class PointNetPolylineEncoder(nn.Module):
             feature_buffers[valid_mask] = feature_buffers_valid
 
         return feature_buffers
+    
+
+class PoseEncoder(nn.Module):
+    def __init__(self, in_channels, hidden_dim, num_layers=3, num_pre_layers=3, out_channels=None, time_encoder='rnn'):
+        super().__init__()
+        self.pre_mlps = build_mlps(
+            c_in=in_channels,
+            mlp_channels=[hidden_dim] * num_pre_layers,
+            ret_before_act=True
+        )
+        self.num_layers = num_layers
+        self.hidden_dim = hidden_dim
+        self.in_channels = in_channels
+        self.time_encoder = time_encoder
+        self.encoder = nn.GRU(hidden_dim, hidden_dim, num_layers=num_layers, batch_first=True)
+        
+        if out_channels is not None:
+            self.out_mlps = build_mlps(
+                c_in=hidden_dim, mlp_channels=[hidden_dim, out_channels], 
+                ret_before_act=True, without_norm=True
+            )
+        else:
+            self.out_mlps = None 
+
+    def forward(self, trajectories):
+        """
+        Args:
+            trajectories (batch_size, num_timestamps, C):
+
+        Returns:
+        """
+        num_center_agents, num_timesteps, C = trajectories.shape
+
+        # pre-mlp
+        trajectories_feature = self.pre_mlps(trajectories)  # (N, time, C)
+        #trajectories_feature = trajectories.new_zeros(num_center_agents, num_agents,  num_timesteps, trajectories_feature_valid.shape[-1])
+        #trajectories_feature[trajectories_mask] = trajectories_feature_valid
+
+        _, hidden = self.encoder(trajectories_feature)
+        feature_buffers = hidden[-1]
+        
+        # out-mlp 
+        if self.out_mlps is not None:
+            feature_buffers = self.out_mlps(feature_buffers)  # (N, C)
+        return feature_buffers

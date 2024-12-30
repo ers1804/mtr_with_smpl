@@ -1,5 +1,6 @@
 {
-  "seconds": 6,
+  "frequency": 10,
+  "seconds": 8,
   "metrics": [
     {
       "k_to_report": [

@@ -29,6 +29,10 @@ class BaseDataset(Dataset):
             self.data_path = config['val_data_path']
         else:
             self.data_path = config['train_data_path']
+        
+        # Pose data from TokenHMR
+        self.use_poses = config['POSES'] if 'POSES' in config.keys() else False
+        self.jepa = config['JEPA'] if 'JEPA' in config.keys() else False
         self.is_validation = is_validation
         self.config = config
         self.data_loaded_memory = []
@@ -62,7 +66,7 @@ class BaseDataset(Dataset):
                     if os.path.exists(self.cache_path):
                         shutil.rmtree(self.cache_path)
                     os.makedirs(self.cache_path, exist_ok=True)
-                    process_num = os.cpu_count() - 1
+                    process_num = 12 #os.cpu_count() - 1
                     print('Using {} processes to load data...'.format(process_num))
 
                     data_splits = np.array_split(summary_list, process_num)
@@ -185,6 +189,8 @@ class BaseDataset(Dataset):
             'object_type': [],
             'trajs': []
         }
+
+
 
         for k, v in tracks.items():
 
@@ -324,6 +330,46 @@ class BaseDataset(Dataset):
             'dynamic_map_infos': dynamic_map_infos,
             'map_infos': map_infos
         }
+
+        # Add pose data from TokenHMR
+        if self.use_poses:
+            if 'pose_sequence' in scenario['metadata'].keys():
+                pose_sequence = scenario['metadata'].pop('pose_sequence')
+                global_orientation = []
+                body_pose = []
+                beta = []
+                keypoints_3d = []
+                keypoints_2d = []
+                sequence_mask = []
+                for pose in pose_sequence:
+                    if 'pred_smpl_params' in pose.keys():
+                        global_orientation.append(pose['pred_smpl_params']['global_orient'])
+                        body_pose.append(pose['pred_smpl_params']['body_pose'])
+                        beta.append(pose['pred_smpl_params']['betas'])
+                        keypoints_3d.append(pose['pred_keypoints_3d'])
+                        keypoints_2d.append(pose['pred_keypoints_2d'])
+                        sequence_mask.append(1)
+                    else:
+                        global_orientation.append(np.zeros((1, 1, 3, 3)))
+                        body_pose.append(np.zeros((1, 23, 3, 3)))
+                        beta.append(np.zeros((1, 10)))
+                        keypoints_3d.append(np.zeros((1, 44, 3)))
+                        keypoints_2d.append(np.zeros((1, 44, 2)))
+                        sequence_mask.append(0)
+                ret['global_orientation'] = np.concatenate(global_orientation, axis=0)[np.newaxis, ...]
+                ret['body_pose'] = np.concatenate(body_pose, axis=0)[np.newaxis, ...]
+                ret['beta'] = np.concatenate(beta, axis=0)[np.newaxis, ...]
+                ret['keypoints_3d'] = np.concatenate(keypoints_3d, axis=0)[np.newaxis, ...]
+                ret['keypoints_2d'] = np.concatenate(keypoints_2d, axis=0)[np.newaxis, ...]
+                ret['sequence_mask'] = np.array(sequence_mask)[np.newaxis, ...]
+            else:
+                ret['global_orientation'] = np.zeros((1, 6, 1, 3, 3))
+                ret['body_pose'] = np.zeros((1, 6, 23, 3, 3))
+                ret['beta'] = np.zeros((1, 6, 10))
+                ret['keypoints_3d'] = np.zeros((1, 6, 44, 3))
+                ret['keypoints_2d'] = np.zeros((1, 6, 44, 2))
+                ret['sequence_mask'] = np.zeros((1, 6))
+
         ret.update(scenario['metadata'])
         ret['timestamps_seconds'] = ret.pop('ts')
         ret['current_time_index'] = self.config['past_len'] - 1
@@ -408,6 +454,14 @@ class BaseDataset(Dataset):
             'center_gt_final_valid_idx': center_gt_final_valid_idx,
             'center_gt_trajs_src': obj_trajs_full[track_index_to_predict]
         }
+
+        if self.use_poses:
+            ret_dict['global_orientation'] = info['global_orientation']
+            ret_dict['body_pose'] = info['body_pose']
+            ret_dict['beta'] = info['beta']
+            ret_dict['keypoints_3d'] = info['keypoints_3d']
+            ret_dict['keypoints_2d'] = info['keypoints_2d']
+            ret_dict['sequence_mask'] = info['sequence_mask']
 
         if info['map_infos']['all_polylines'].__len__() == 0:
             info['map_infos']['all_polylines'] = np.zeros((2, 7), dtype=np.float32)
@@ -549,6 +603,13 @@ class BaseDataset(Dataset):
         vel_pre = np.roll(vel, shift=1, axis=2)
         acce = (vel - vel_pre) / 0.1
         acce[:, :, 0, :] = acce[:, :, 1, :]
+
+        if self.jepa:
+            num_future_timestamps = obj_trajs_future.shape[1]
+            object_time_embedding = np.zeros((num_center_objects, num_objects, num_timestamps, 91 + 1))
+            for i in range(num_timestamps):
+                object_time_embedding[:, :, i, i] = 1
+            object_time_embedding[:, :, :, -1] = timestamps
 
         obj_trajs_data = np.concatenate([
             obj_trajs[:, :, :, 0:6],
@@ -923,8 +984,9 @@ class BaseDataset(Dataset):
         map_polylines = map_polylines[:, :, :, :6]
         # one-hot encoding for map types, 14 types in total, use 20 for reserved types
         map_types = np.eye(20)[map_types.astype(int)]
-
-        map_polylines = np.concatenate((map_polylines, xy_pos_pre, map_types), axis=-1)
+        # TODO: Turned off one-hot encoding
+        #map_polylines = np.concatenate((map_polylines, xy_pos_pre, map_types), axis=-1)
+        map_polylines = np.concatenate((map_polylines, xy_pos_pre), axis=-1)
 
         return map_polylines, map_polylines_mask, map_polylines_center
 

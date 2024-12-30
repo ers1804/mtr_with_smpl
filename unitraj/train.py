@@ -54,7 +54,8 @@ def train(cfg):
         accelerator="cpu" if cfg.debug else "gpu",
         profiler="simple",
         strategy="auto" if cfg.debug else "ddp",
-        callbacks=call_backs
+        callbacks=call_backs,
+        log_every_n_steps=2
     )
 
     # automatically resume training

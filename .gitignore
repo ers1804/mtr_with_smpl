@@ -14,3 +14,5 @@ UniTraj.egg-info/PKG-INFO
 UniTraj.egg-info/dependency_links.txt
 unitraj/models/mtr/ops/knn/knn_cuda.cpython-38-x86_64-linux-gnu.so
 unitraj/models/mtr/ops/attention/attention_cuda.cpython-38-x86_64-linux-gnu.so
+unitraj/wandb
+unitraj/unitraj

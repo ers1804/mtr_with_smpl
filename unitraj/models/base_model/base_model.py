@@ -20,6 +20,9 @@ class BaseModel(pl.LightningModule):
         if config.get('eval_nuscenes', False):
             self.init_nuscenes()
 
+        if config.get('eval_vod', False):
+            self.init_vod()
+
     def init_nuscenes(self):
         if self.config.get('eval_nuscenes', False):
             from nuscenes import NuScenes
@@ -35,6 +38,24 @@ class BaseModel(pl.LightningModule):
             with open('models/base_model/nuscenes_config.json', 'r') as f:
                 pred_config = json.load(f)
             self.pred_config5 = PredictionConfig.deserialize(pred_config, self.helper)
+
+    
+    def init_vod(self):
+        if self.config.get('eval_vod', False):
+            from vod import VOD
+
+            from vod.eval.prediction.config import PredictionConfig
+
+            from vod.prediction import PredictHelper
+            vod = VOD(version='v1.0-trainval', dataroot=self.config['vod_dataroot'])
+
+            # Prediction helper and configs:
+            self.helper = PredictHelper(vod)
+
+            with open('models/base_model/vod_config.json', 'r') as f:
+                pred_config = json.load(f)
+            self.pred_config5 = PredictionConfig.deserialize(pred_config, self.helper)
+
 
     def forward(self, batch):
         """
