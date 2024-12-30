@@ -47,6 +47,7 @@ class MotionTransformer(BaseModel):
         self.jepa_weights = self.model_cfg.CONTEXT_ENCODER.get('JEPA_WEIGHTS', None)
         self.freeze = self.model_cfg.CONTEXT_ENCODER.get('FREEZE', False)
         self.layers_for_probing = self.model_cfg.CONTEXT_ENCODER.get('LAYERS_FOR_PROBING', False)
+        self.unfreeze_map = self.model_cfg.CONTEXT_ENCODER.get('UNFREEZE_MAP', False)
         if self.jepa_weights is not None:
             # TODO: Check if dictionary is correct
             self.load_encoder_params_from_file(self.jepa_weights, None, to_cpu=True)
@@ -56,7 +57,10 @@ class MotionTransformer(BaseModel):
             if self.layers_for_probing:
                 for p in self.context_encoder.self_attn_layers[-1].parameters():
                     p.requires_grad = True
-                for p in self.context_encoder.self_attn_layers[-2].parameters():
+                # for p in self.context_encoder.self_attn_layers[-2].parameters():
+                #     p.requires_grad = True
+            if self.unfreeze_map:
+                for p in self.context_encoder.map_polyline_encoder.parameters():
                     p.requires_grad = True
         self.motion_decoder = MTRDecoder(
             in_channels=self.context_encoder.num_out_channels,
