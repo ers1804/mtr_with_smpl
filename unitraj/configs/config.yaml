@@ -7,8 +7,8 @@ devices: [ 0 ] # gpu ids
 
 # data related
 load_num_workers: 8 # number of workers for loading data
-train_data_path: [ "/home/erik/ssd2/datasets/scenarionet_argoverse2_train"] # list of paths to the training data VOD: /home/erik/raid/datasets/vod/scenarionet_vod_train NUSC: /home/erik/ssd2/datasets/scenarionet_nusc_train VOD Pose: /home/erik/raid/datasets/vod/scenarionet_vod_train_with_poses nuScenes: /home/erik/ssd2/datasets/scenarionet_nusc_train_1_8
-val_data_path: [ "/home/erik/ssd2/datasets/scenarionet_argoverse2_val" ] # list of paths to the validation data VOD: /home/erik/raid/datasets/vod/scenarionet_vod_val NUSC: /home/erik/ssd2/datasets/scenarionet_nusc_val VOD Pose: /home/erik/raid/datasets/vod/scenarionet_vod_val_with_poses nuScenes: /home/erik/ssd2/datasets/scenarionet_nusc_val_1_8
+train_data_path: [ "/mnt/md0/erik/av2/scenarionet_argoverse2_train"] # list of paths to the training data VOD: /home/erik/raid/datasets/vod/scenarionet_vod_train NUSC: /home/erik/ssd2/datasets/scenarionet_nusc_train VOD Pose: /home/erik/raid/datasets/vod/scenarionet_vod_train_with_poses nuScenes: /home/erik/ssd2/datasets/scenarionet_nusc_train_1_8
+val_data_path: [ "/mnt/md0/erik/av2/scenarionet_argoverse2_val" ] # list of paths to the validation data VOD: /home/erik/raid/datasets/vod/scenarionet_vod_val NUSC: /home/erik/ssd2/datasets/scenarionet_nusc_val VOD Pose: /home/erik/raid/datasets/vod/scenarionet_vod_val_with_poses nuScenes: /home/erik/ssd2/datasets/scenarionet_nusc_val_1_8
 max_data_num: [ 100000] # maximum number of data for each training dataset
 starting_frame: [ 0] # history trajectory starts at this frame for each training dataset
 past_len: 20 #11 # history trajectory length, 2.1s #VOD: 6 NUSC: 21 AV2: 20

@@ -19,8 +19,10 @@ CONTEXT_ENCODER:
   USE_LOCAL_ATTN: True
   USE_POSES: False
   FEATURE_TYPE: 'smpl'
-  JEPA_WEIGHTS: '/home/erik/NAS/personal/jepa_eval/complete_experiments/Training_1_1_0001/ckpt/checkpoint_epoch_80.pth'
-  LAYERS_FOR_PROBING: True
+  JEPA_WEIGHTS: '/mnt/md0/erik/checkpoints_jepa/checkpoint_epoch_80.pth'
+  LAYERS_FOR_PROBING: [-1]
+  FREEZE: True
+  UNFREEZE_MAP: True
 
 MOTION_DECODER:
   NAME: MTRDecoder
