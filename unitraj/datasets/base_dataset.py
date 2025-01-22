@@ -373,14 +373,26 @@ class BaseDataset(Dataset):
         ret.update(scenario['metadata'])
         ret['timestamps_seconds'] = ret.pop('ts')
         ret['current_time_index'] = self.config['past_len'] - 1
-        ret['sdc_track_index'] = track_infos['object_id'].index(ret['sdc_id'])
-        if self.config['only_train_on_ego'] or ret.get('tracks_to_predict', None) is None:
-            tracks_to_predict = {
-                'track_index': [ret['sdc_track_index']],
-                'difficulty': [0],
-                'object_type': [MetaDriveType.VEHICLE]
-            }
+        if ret['sdc_id'] in track_infos['object_id']:
+            ret['sdc_track_index'] = track_infos['object_id'].index(ret['sdc_id'])
+            if self.config['only_train_on_ego'] or ret.get('tracks_to_predict', None) is None:
+                tracks_to_predict = {
+                    'track_index': [ret['sdc_track_index']],
+                    'difficulty': [0],
+                    'object_type': [MetaDriveType.VEHICLE]
+                }
+            else:
+                sample_list = list(ret['tracks_to_predict'].keys())  # + ret.get('objects_of_interest', [])
+                sample_list = list(set(sample_list))
+
+                tracks_to_predict = {
+                    'track_index': [track_infos['object_id'].index(id) for id in sample_list if
+                                    id in track_infos['object_id']],
+                    'object_type': [track_infos['object_type'][track_infos['object_id'].index(id)] for id in sample_list if
+                                    id in track_infos['object_id']],
+                }
         else:
+            ret['sdc_track_index'] = None
             sample_list = list(ret['tracks_to_predict'].keys())  # + ret.get('objects_of_interest', [])
             sample_list = list(set(sample_list))
 
@@ -588,7 +600,8 @@ class BaseDataset(Dataset):
         object_onehot_mask[:, obj_types == 2, :, 1] = 1
         object_onehot_mask[:, obj_types == 3, :, 2] = 1
         object_onehot_mask[np.arange(num_center_objects), track_index_to_predict, :, 3] = 1
-        object_onehot_mask[:, sdc_track_index, :, 4] = 1
+        if sdc_track_index is not None:
+            object_onehot_mask[:, sdc_track_index, :, 4] = 1
 
         object_time_embedding = np.zeros((num_center_objects, num_objects, num_timestamps, num_timestamps + 1))
         for i in range(num_timestamps):
