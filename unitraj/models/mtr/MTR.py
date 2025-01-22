@@ -37,7 +37,10 @@ class MotionTransformer(BaseModel):
         self.config = config
         self.model_cfg = EasyDict(config)
         self.pred_dicts = []
-
+        
+        self.without_hd_map = self.model_cfg.get('without_hd_map', False)
+        self.model_cfg.CONTEXT_ENCODER['without_hd_map'] = self.without_hd_map
+        self.model_cfg.MOTION_DECODER['without_hd_map'] = self.without_hd_map
         self.model_cfg.MOTION_DECODER['CENTER_OFFSET_OF_MAP'] = self.model_cfg['center_offset_of_map']
         self.model_cfg.MOTION_DECODER['NUM_FUTURE_FRAMES'] = self.model_cfg['future_len']
         self.model_cfg.MOTION_DECODER['OBJECT_TYPE'] = self.model_cfg['object_type']
@@ -134,6 +137,7 @@ class MTREncoder(nn.Module):
     def __init__(self, config):
         super().__init__()
         self.model_cfg = config
+        self.without_hd_map = self.model_cfg.get('without_hd_map', False)
 
         # build polyline encoders
         self.agent_polyline_encoder = self.build_polyline_encoder(
@@ -142,13 +146,14 @@ class MTREncoder(nn.Module):
             num_layers=self.model_cfg.NUM_LAYER_IN_MLP_AGENT,
             out_channels=self.model_cfg.D_MODEL
         )
-        self.map_polyline_encoder = self.build_polyline_encoder(
-            in_channels=self.model_cfg.NUM_INPUT_ATTR_MAP,
-            hidden_dim=self.model_cfg.NUM_CHANNEL_IN_MLP_MAP,
-            num_layers=self.model_cfg.NUM_LAYER_IN_MLP_MAP,
-            num_pre_layers=self.model_cfg.NUM_LAYER_IN_PRE_MLP_MAP,
-            out_channels=self.model_cfg.D_MODEL
-        )
+        if not self.without_hd_map:
+            self.map_polyline_encoder = self.build_polyline_encoder(
+                in_channels=self.model_cfg.NUM_INPUT_ATTR_MAP,
+                hidden_dim=self.model_cfg.NUM_CHANNEL_IN_MLP_MAP,
+                num_layers=self.model_cfg.NUM_LAYER_IN_MLP_MAP,
+                num_pre_layers=self.model_cfg.NUM_LAYER_IN_PRE_MLP_MAP,
+                out_channels=self.model_cfg.D_MODEL
+            )
         if self.model_cfg.get('USE_POSES', False):
             self.feature_type = self.model_cfg.get('FEATURE_TYPE', 'smpl')
             self.agent_pose_encoder = self.build_pose_encoder(
@@ -295,31 +300,42 @@ class MTREncoder(nn.Module):
         """
         input_dict = batch_dict['input_dict']
         obj_trajs, obj_trajs_mask = input_dict['obj_trajs'], input_dict['obj_trajs_mask']
-        map_polylines, map_polylines_mask = input_dict['map_polylines'], input_dict['map_polylines_mask']
+        if not self.without_hd_map:
+            map_polylines, map_polylines_mask = input_dict['map_polylines'], input_dict['map_polylines_mask']
 
         obj_trajs_last_pos = input_dict['obj_trajs_last_pos']
-        map_polylines_center = input_dict['map_polylines_center']
+        if not self.without_hd_map:
+            map_polylines_center = input_dict['map_polylines_center']
         track_index_to_predict = input_dict['track_index_to_predict']
 
         assert obj_trajs_mask.dtype == torch.bool and map_polylines_mask.dtype == torch.bool
 
         num_center_objects, num_objects, num_timestamps, _ = obj_trajs.shape
-        num_polylines = map_polylines.shape[1]
+        if not self.without_hd_map:
+            num_polylines = map_polylines.shape[1]
 
         # apply polyline encoder
         obj_trajs_in = torch.cat((obj_trajs, obj_trajs_mask[:, :, :, None].type_as(obj_trajs)), dim=-1)
         obj_polylines_feature = self.agent_polyline_encoder(obj_trajs_in,
                                                             obj_trajs_mask)  # (num_center_objects, num_objects, C)
-        map_polylines_feature = self.map_polyline_encoder(map_polylines,
-                                                          map_polylines_mask)  # (num_center_objects, num_polylines, C)
+                                                            
+        if not self.without_hd_map:
+            map_polylines_feature = self.map_polyline_encoder(map_polylines,
+                                                            map_polylines_mask)  # (num_center_objects, num_polylines, C)
             
         # apply self-attn
         obj_valid_mask = (obj_trajs_mask.sum(dim=-1) > 0)  # (num_center_objects, num_objects)
-        map_valid_mask = (map_polylines_mask.sum(dim=-1) > 0)  # (num_center_objects, num_polylines)
+        if not self.without_hd_map:
+            map_valid_mask = (map_polylines_mask.sum(dim=-1) > 0)  # (num_center_objects, num_polylines)
 
-        global_token_feature = torch.cat((obj_polylines_feature, map_polylines_feature), dim=1)
-        global_token_mask = torch.cat((obj_valid_mask, map_valid_mask), dim=1)
-        global_token_pos = torch.cat((obj_trajs_last_pos, map_polylines_center), dim=1)
+        if self.without_hd_map:
+            global_token_feature = obj_polylines_feature
+            global_token_mask = obj_valid_mask
+            global_token_pos = obj_trajs_last_pos
+        else:
+            global_token_feature = torch.cat((obj_polylines_feature, map_polylines_feature), dim=1)
+            global_token_mask = torch.cat((obj_valid_mask, map_valid_mask), dim=1)
+            global_token_pos = torch.cat((obj_trajs_last_pos, map_polylines_center), dim=1)
 
         if self.use_local_attn:
             global_token_feature = self.apply_local_attn(
@@ -332,8 +348,10 @@ class MTREncoder(nn.Module):
             )
 
         obj_polylines_feature = global_token_feature[:, :num_objects]
-        map_polylines_feature = global_token_feature[:, num_objects:]
-        assert map_polylines_feature.shape[1] == num_polylines
+
+        if not self.without_hd_map:
+            map_polylines_feature = global_token_feature[:, num_objects:]
+            assert map_polylines_feature.shape[1] == num_polylines
 
         # organize return features
         center_objects_feature = obj_polylines_feature[torch.arange(num_center_objects), track_index_to_predict]
@@ -361,11 +379,14 @@ class MTREncoder(nn.Module):
 
         batch_dict['center_objects_feature'] = center_objects_feature
         batch_dict['obj_feature'] = obj_polylines_feature
-        batch_dict['map_feature'] = map_polylines_feature
+        if not self.without_hd_map:
+            batch_dict['map_feature'] = map_polylines_feature
         batch_dict['obj_mask'] = obj_valid_mask
-        batch_dict['map_mask'] = map_valid_mask
+        if not self.without_hd_map:
+            batch_dict['map_mask'] = map_valid_mask
         batch_dict['obj_pos'] = obj_trajs_last_pos
-        batch_dict['map_pos'] = map_polylines_center
+        if not self.without_hd_map:
+            batch_dict['map_pos'] = map_polylines_center
 
         return batch_dict
 
@@ -374,6 +395,7 @@ class MTRDecoder(nn.Module):
     def __init__(self, in_channels, config):
         super().__init__()
         self.model_cfg = config
+        self.without_hd_map = self.model_cfg.get('self.without_hd_map', False)
         self.object_type = self.model_cfg.OBJECT_TYPE
         self.num_future_frames = self.model_cfg.NUM_FUTURE_FRAMES
         self.num_motion_modes = self.model_cfg.NUM_MOTION_MODES
@@ -396,22 +418,23 @@ class MTRDecoder(nn.Module):
             use_local_attn=False
         )
 
-        map_d_model = self.model_cfg.get('MAP_D_MODEL', self.d_model)
-        self.in_proj_map, self.map_decoder_layers = self.build_transformer_decoder(
-            in_channels=in_channels,
-            d_model=map_d_model,
-            nhead=self.model_cfg.NUM_ATTN_HEAD,
-            dropout=self.model_cfg.get('DROPOUT_OF_ATTN', 0.1),
-            num_decoder_layers=self.num_decoder_layers,
-            use_local_attn=True
-        )
-        if map_d_model != self.d_model:
-            temp_layer = nn.Linear(self.d_model, map_d_model)
-            self.map_query_content_mlps = nn.ModuleList(
-                [copy.deepcopy(temp_layer) for _ in range(self.num_decoder_layers)])
-            self.map_query_embed_mlps = nn.Linear(self.d_model, map_d_model)
-        else:
-            self.map_query_content_mlps = self.map_query_embed_mlps = None
+        if not self.without_hd_map:
+            map_d_model = self.model_cfg.get('MAP_D_MODEL', self.d_model)
+            self.in_proj_map, self.map_decoder_layers = self.build_transformer_decoder(
+                in_channels=in_channels,
+                d_model=map_d_model,
+                nhead=self.model_cfg.NUM_ATTN_HEAD,
+                dropout=self.model_cfg.get('DROPOUT_OF_ATTN', 0.1),
+                num_decoder_layers=self.num_decoder_layers,
+                use_local_attn=True
+            )
+            if map_d_model != self.d_model:
+                temp_layer = nn.Linear(self.d_model, map_d_model)
+                self.map_query_content_mlps = nn.ModuleList(
+                    [copy.deepcopy(temp_layer) for _ in range(self.num_decoder_layers)])
+                self.map_query_embed_mlps = nn.Linear(self.d_model, map_d_model)
+            else:
+                self.map_query_content_mlps = self.map_query_embed_mlps = None
 
         # define the dense future prediction layers
         self.build_dense_future_prediction_layers(
@@ -424,8 +447,12 @@ class MTRDecoder(nn.Module):
         )
 
         # define the motion head
-        temp_layer = build_mlps(c_in=self.d_model * 2 + map_d_model, mlp_channels=[self.d_model, self.d_model],
-                                ret_before_act=True)
+        if not self.without_hd_map:
+            temp_layer = build_mlps(c_in=self.d_model * 2 + map_d_model, mlp_channels=[self.d_model, self.d_model],
+                                    ret_before_act=True)
+        else:
+            temp_layer = build_mlps(c_in=self.d_model * 2, mlp_channels=[self.d_model, self.d_model],
+                                    ret_before_act=True)
         self.query_feature_fusion_layers = nn.ModuleList(
             [copy.deepcopy(temp_layer) for _ in range(self.num_decoder_layers)])
 
@@ -694,29 +721,33 @@ class MTRDecoder(nn.Module):
             )
 
             # query map feature
-            collected_idxs, base_map_idxs = self.apply_dynamic_map_collection(
-                map_pos=map_pos, map_mask=map_mask,
-                pred_waypoints=pred_waypoints,
-                base_region_offset=self.model_cfg.CENTER_OFFSET_OF_MAP,
-                num_waypoint_polylines=self.model_cfg.NUM_WAYPOINT_MAP_POLYLINES,
-                num_base_polylines=self.model_cfg.NUM_BASE_MAP_POLYLINES,
-                base_map_idxs=base_map_idxs,
-                num_query=num_query
-            )
+            if not self.without_hd_map:
+                collected_idxs, base_map_idxs = self.apply_dynamic_map_collection(
+                    map_pos=map_pos, map_mask=map_mask,
+                    pred_waypoints=pred_waypoints,
+                    base_region_offset=self.model_cfg.CENTER_OFFSET_OF_MAP,
+                    num_waypoint_polylines=self.model_cfg.NUM_WAYPOINT_MAP_POLYLINES,
+                    num_base_polylines=self.model_cfg.NUM_BASE_MAP_POLYLINES,
+                    base_map_idxs=base_map_idxs,
+                    num_query=num_query
+                )
 
-            map_query_feature = self.apply_cross_attention(
-                kv_feature=map_feature, kv_mask=map_mask, kv_pos=map_pos,
-                query_content=query_content, query_embed=intention_query,
-                attention_layer=self.map_decoder_layers[layer_idx],
-                layer_idx=layer_idx,
-                dynamic_query_center=dynamic_query_center,
-                use_local_attn=True,
-                query_index_pair=collected_idxs,
-                query_content_pre_mlp=self.map_query_content_mlps[layer_idx],
-                query_embed_pre_mlp=self.map_query_embed_mlps
-            )
+                map_query_feature = self.apply_cross_attention(
+                    kv_feature=map_feature, kv_mask=map_mask, kv_pos=map_pos,
+                    query_content=query_content, query_embed=intention_query,
+                    attention_layer=self.map_decoder_layers[layer_idx],
+                    layer_idx=layer_idx,
+                    dynamic_query_center=dynamic_query_center,
+                    use_local_attn=True,
+                    query_index_pair=collected_idxs,
+                    query_content_pre_mlp=self.map_query_content_mlps[layer_idx],
+                    query_embed_pre_mlp=self.map_query_embed_mlps
+                )
 
-            query_feature = torch.cat([center_objects_feature, obj_query_feature, map_query_feature], dim=-1)
+            if not self.without_hd_map:
+                query_feature = torch.cat([center_objects_feature, obj_query_feature, map_query_feature], dim=-1)
+            else:
+                query_feature = torch.cat([center_objects_feature, obj_query_feature], dim=-1)
             query_content = self.query_feature_fusion_layers[layer_idx](
                 query_feature.flatten(start_dim=0, end_dim=1)
             ).view(num_query, num_center_objects, -1)
@@ -897,10 +928,11 @@ class MTRDecoder(nn.Module):
     def forward(self, batch_dict):
         input_dict = batch_dict['input_dict']
         obj_feature, obj_mask, obj_pos = batch_dict['obj_feature'], batch_dict['obj_mask'], batch_dict['obj_pos']
-        map_feature, map_mask, map_pos = batch_dict['map_feature'], batch_dict['map_mask'], batch_dict['map_pos']
+        if not self.without_hd_map:
+            map_feature, map_mask, map_pos = batch_dict['map_feature'], batch_dict['map_mask'], batch_dict['map_pos']
+            num_polylines = map_feature.shape[1]
         center_objects_feature = batch_dict['center_objects_feature']
         num_center_objects, num_objects, _ = obj_feature.shape
-        num_polylines = map_feature.shape[1]
 
         # input projection
         center_objects_feature = self.in_proj_center_obj(center_objects_feature)
@@ -908,21 +940,30 @@ class MTRDecoder(nn.Module):
         obj_feature = obj_feature.new_zeros(num_center_objects, num_objects, obj_feature_valid.shape[-1])
         obj_feature[obj_mask] = obj_feature_valid
 
-        map_feature_valid = self.in_proj_map(map_feature[map_mask])
-        map_feature = map_feature.new_zeros(num_center_objects, num_polylines, map_feature_valid.shape[-1])
-        map_feature[map_mask] = map_feature_valid
+        if not not self.without_hd_map:
+            map_feature_valid = self.in_proj_map(map_feature[map_mask])
+            map_feature = map_feature.new_zeros(num_center_objects, num_polylines, map_feature_valid.shape[-1])
+            map_feature[map_mask] = map_feature_valid
 
         # dense future prediction
         obj_feature, pred_dense_future_trajs = self.apply_dense_future_prediction(
             obj_feature=obj_feature, obj_mask=obj_mask, obj_pos=obj_pos
         )
         # decoder layers
-        pred_list = self.apply_transformer_decoder(
-            center_objects_feature=center_objects_feature,
-            center_objects_type=input_dict['center_objects_type'],
-            obj_feature=obj_feature, obj_mask=obj_mask, obj_pos=obj_pos,
-            map_feature=map_feature, map_mask=map_mask, map_pos=map_pos
-        )
+        if not not self.without_hd_map:
+            pred_list = self.apply_transformer_decoder(
+                center_objects_feature=center_objects_feature,
+                center_objects_type=input_dict['center_objects_type'],
+                obj_feature=obj_feature, obj_mask=obj_mask, obj_pos=obj_pos,
+                map_feature=map_feature, map_mask=map_mask, map_pos=map_pos
+            )
+        else:
+            pred_list = self.apply_transformer_decoder(
+                center_objects_feature=center_objects_feature,
+                center_objects_type=input_dict['center_objects_type'],
+                obj_feature=obj_feature, obj_mask=obj_mask, obj_pos=obj_pos,
+                map_feature=None, map_mask=None, map_pos=None
+            )
 
         self.forward_ret_dict['pred_list'] = pred_list
         batch_dict['pred_list'] = pred_list
