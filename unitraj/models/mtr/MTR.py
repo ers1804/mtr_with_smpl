@@ -306,9 +306,8 @@ class MTREncoder(nn.Module):
         obj_trajs_last_pos = input_dict['obj_trajs_last_pos']
         if not self.without_hd_map:
             map_polylines_center = input_dict['map_polylines_center']
+            assert obj_trajs_mask.dtype == torch.bool and map_polylines_mask.dtype == torch.bool
         track_index_to_predict = input_dict['track_index_to_predict']
-
-        assert obj_trajs_mask.dtype == torch.bool and map_polylines_mask.dtype == torch.bool
 
         num_center_objects, num_objects, num_timestamps, _ = obj_trajs.shape
         if not self.without_hd_map:
@@ -395,7 +394,7 @@ class MTRDecoder(nn.Module):
     def __init__(self, in_channels, config):
         super().__init__()
         self.model_cfg = config
-        self.without_hd_map = self.model_cfg.get('self.without_hd_map', False)
+        self.without_hd_map = self.model_cfg.get('without_hd_map', False)
         self.object_type = self.model_cfg.OBJECT_TYPE
         self.num_future_frames = self.model_cfg.NUM_FUTURE_FRAMES
         self.num_motion_modes = self.model_cfg.NUM_MOTION_MODES
@@ -940,7 +939,7 @@ class MTRDecoder(nn.Module):
         obj_feature = obj_feature.new_zeros(num_center_objects, num_objects, obj_feature_valid.shape[-1])
         obj_feature[obj_mask] = obj_feature_valid
 
-        if not not self.without_hd_map:
+        if not self.without_hd_map:
             map_feature_valid = self.in_proj_map(map_feature[map_mask])
             map_feature = map_feature.new_zeros(num_center_objects, num_polylines, map_feature_valid.shape[-1])
             map_feature[map_mask] = map_feature_valid
@@ -950,7 +949,7 @@ class MTRDecoder(nn.Module):
             obj_feature=obj_feature, obj_mask=obj_mask, obj_pos=obj_pos
         )
         # decoder layers
-        if not not self.without_hd_map:
+        if not self.without_hd_map:
             pred_list = self.apply_transformer_decoder(
                 center_objects_feature=center_objects_feature,
                 center_objects_type=input_dict['center_objects_type'],

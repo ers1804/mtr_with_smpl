@@ -14,7 +14,8 @@ import os
 from sklearn.cluster import KMeans
 import math
 import pickle
-from enum import Enum
+from enum import Enum#
+import numpy as np
 
 class VRUType(Enum):
     VEHICLE = 1
@@ -78,14 +79,18 @@ def process_batch(data, last_valid_positions, only_pred=True, extra_tag=''):
             last_position_index = data['input_dict']['center_gt_final_valid_idx']
             type = data['input_dict']['center_objects_type']
             
-            accepted_indices = [29]
+            accepted_indices = [59]
             
             for center_obj_idx in range(pred.shape[0]):
                 last_index = int(last_position_index[center_obj_idx])
                 if last_index in accepted_indices:
                 # if last_index >= 0:
                     category = type[center_obj_idx]
-                    last_valid_positions[VRUType(category).name].append(pred[center_obj_idx, last_index, :2].cpu().numpy())
+                    pos = pred[center_obj_idx, last_index, :2].cpu().numpy()
+                    if np.isnan(pos).any():
+                        continue
+                    else:
+                        last_valid_positions[VRUType(category).name].append(pos)
                     
         elif not only_pred:
             # for all objects in the batch
@@ -192,8 +197,8 @@ def main(cfg):
 
     extra_tag = ''
     
-    save_path = f'/home/erik/gitprojects/UniTraj/unitraj/models/mtr/last_valid_pos_av2.pkl'
-    save_path_centroids = f'/home/erik/gitprojects/UniTraj/unitraj/models/mtr/cluster_64_center_dict_av2.pkl'
+    save_path = f'/home/erik/gitprojects/UniTraj/unitraj/models/mtr/last_valid_pos_ecp.pkl'
+    save_path_centroids = f'/home/erik/gitprojects/UniTraj/unitraj/models/mtr/cluster_64_center_dict_ecp.pkl'
     
     # Create an empty dictionary to store the last valid states categorized by type
     last_valid_positions = {

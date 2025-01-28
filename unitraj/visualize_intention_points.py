@@ -51,9 +51,9 @@ def plot_compare(data1, data2, img_name= 'data.png', extra_tag=''):
     }
     # slightly brigther colors
     color2 = {
-        'TYPE_VEHICLE': 'skyblue',
-        'TYPE_PEDESTRIAN': 'salmon',
-        'TYPE_CYCLIST': 'lightgreen'
+        'VEHICLE': 'blue',
+        'PEDESTRIAN': 'red',
+        'CYCLIST': 'green'
     }
     
     for agent1, agent2 in zip(agent_type, agent2_type):
