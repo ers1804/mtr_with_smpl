@@ -18,7 +18,7 @@ CONTEXT_ENCODER:
   DROPOUT_OF_ATTN: 0.1
   USE_LOCAL_ATTN: True
   USE_POSES: False
-  FEATURE_TYPE: 'smpl'
+  FEATURE_TYPE: '3d'
   #JEPA_WEIGHTS: None #'/home/erik/NAS/personal/jepa_eval/complete_experiments/Training_1_1_0001/ckpt/checkpoint_epoch_80.pth'
   LAYERS_FOR_PROBING: [-1]
   FREEZE: True
@@ -61,7 +61,7 @@ eval_batch_size: 128 #512 #32 #128
 
 # data related
 without_hd_map: True
-max_num_agents: 64
+max_num_agents: 1
 map_range: 100
 max_num_roads: 768
 

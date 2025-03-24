@@ -26,8 +26,8 @@ sys.path.append('/home/erik/gitprojects/TokenHMR')
 #from tokenhmr.lib.models import load_tokenhmr
 
 Type_dict = {0: 'UNSET', 1: 'VEHICLE', 2: 'PEDESTRIAN', 3: 'CYCLIST'}
-feature_sizes = {'smpl': 9+(9*23)+10, '3d': 44*3, '2d': 44*2}
-feature_names = {'smpl': ['global_orientation', 'body_pose', 'beta'], '3d': ['keypoints_3d'], '2d': ['keypoints_2d']}
+feature_sizes = {'smpl': 9+(9*23)+10, '3d': 17*3, '2d': 44*2}
+feature_names = {'smpl': ['global_orientation', 'body_pose', 'beta'], '3d': ['obj_poses'], '2d': ['keypoints_2d']}
 
 
 class MotionTransformer(BaseModel):
@@ -155,7 +155,7 @@ class MTREncoder(nn.Module):
                 out_channels=self.model_cfg.D_MODEL
             )
         if self.model_cfg.get('USE_POSES', False):
-            self.feature_type = self.model_cfg.get('FEATURE_TYPE', 'smpl')
+            self.feature_type = self.model_cfg.get('FEATURE_TYPE', '3d')
             self.agent_pose_encoder = self.build_pose_encoder(
                 in_channels=feature_sizes[self.feature_type],
                 hidden_dim=self.model_cfg.NUM_CHANNEL_IN_MLP_AGENT,
@@ -357,24 +357,18 @@ class MTREncoder(nn.Module):
 
         # Encode poses and fuse them with other agent attributes
         if self.model_cfg.get('USE_POSES', False):
-            used_feature_names = []
-            for feature_name in feature_names[self.feature_type]:
-                feature_shape = input_dict[feature_name].shape
-                used_feature_names.append(input_dict[feature_name].view(feature_shape[0], feature_shape[1], -1))
-            obj_poses = torch.cat(used_feature_names, dim=-1)
-            obj_poses_mask = input_dict['sequence_mask']
-            invalid_samples = torch.all(~(obj_poses_mask==1.0), dim=1)
-            valid_samples = ~invalid_samples
-            all_invalid = torch.all(invalid_samples)
-            if ~all_invalid:
-                obj_poses = obj_poses[valid_samples]
-                obj_poses_features = self.agent_pose_encoder(obj_poses)
-                valid_center_objects_feature = center_objects_feature[valid_samples]
-                concatenated_features = torch.cat((valid_center_objects_feature, obj_poses_features), dim=-1)
-                center_objects_feature[valid_samples] = self.fusion_module(
-                    concatenated_features
-                )
-                obj_polylines_feature[torch.arange(num_center_objects), track_index_to_predict] = center_objects_feature
+            # used_feature_names = []
+            # for feature_name in feature_names[self.feature_type]:
+            #     feature_shape = input_dict[feature_name].shape
+            #     used_feature_names.append(input_dict[feature_name].view(feature_shape[0], feature_shape[1], -1))
+            obj_poses = batch_dict['obj_poses'].view(num_center_objects, num_objects, num_timestamps, -1)
+            obj_poses = obj_poses[torch.arange(num_center_objects), track_index_to_predict].squeeze()
+            obj_poses_mask = batch_dict['valid_pose_mask']
+            obj_poses_mask = obj_poses_mask[torch.arange(num_center_objects), track_index_to_predict].squeeze()
+            obj_poses_feature = self.agent_pose_encoder(obj_poses, obj_poses_mask)
+            center_objects_feature = torch.cat((center_objects_feature, obj_poses_feature), dim=-1)
+            center_objects_feature = self.fusion_module(center_objects_feature)
+
 
         batch_dict['center_objects_feature'] = center_objects_feature
         batch_dict['obj_feature'] = obj_polylines_feature

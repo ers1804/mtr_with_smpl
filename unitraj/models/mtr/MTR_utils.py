@@ -121,7 +121,7 @@ class PoseEncoder(nn.Module):
         else:
             self.out_mlps = None 
 
-    def forward(self, trajectories):
+    def forward(self, trajectories, mask):
         """
         Args:
             trajectories (batch_size, num_timestamps, C):
@@ -131,14 +131,22 @@ class PoseEncoder(nn.Module):
         num_center_agents, num_timesteps, C = trajectories.shape
 
         # pre-mlp
+        valid_mask = torch.all(mask, dim=-1)
+        buffer = torch.zeros((num_center_agents, self.hidden_dim), device=trajectories.device)
         trajectories_feature = self.pre_mlps(trajectories)  # (N, time, C)
         #trajectories_feature = trajectories.new_zeros(num_center_agents, num_agents,  num_timesteps, trajectories_feature_valid.shape[-1])
         #trajectories_feature[trajectories_mask] = trajectories_feature_valid
 
+
         _, hidden = self.encoder(trajectories_feature)
         feature_buffers = hidden[-1]
+        buffer[valid_mask] = feature_buffers[valid_mask]
         
         # out-mlp 
         if self.out_mlps is not None:
             feature_buffers = self.out_mlps(feature_buffers)  # (N, C)
-        return feature_buffers
+            masked_buffers = torch.zeros_like(feature_buffers)
+            masked_buffers[valid_mask] = feature_buffers[valid_mask]
+            return masked_buffers
+        else:
+            return buffer

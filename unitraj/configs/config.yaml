@@ -1,5 +1,5 @@
 # exp setting
-exp_name: 'Intention_points_ecp_4_lower_dims_20_modes' # name that will be used in wandb
+exp_name: 'Intention_points_ecp_4_lower_dims_20_modes_test_1' # name that will be used in wandb
 ckpt_path: null # checkpoint path, used for evaluation
 seed: 42 # random seed
 debug: False # debug mode, will use cpu only
@@ -7,8 +7,8 @@ devices: [ 0 ] # gpu ids
 
 # data related
 load_num_workers: 8 # number of workers for loading data
-train_data_path: [ "/home/erik/ssd2/datasets/scenarionet_ecp_train"] # list of paths to the training data VOD: /home/erik/raid/datasets/vod/scenarionet_vod_train NUSC: /home/erik/ssd2/datasets/scenarionet_nusc_train VOD Pose: /home/erik/raid/datasets/vod/scenarionet_vod_train_with_poses nuScenes: /home/erik/ssd2/datasets/scenarionet_nusc_train_1_8 ECP: /home/erik/ssd2/datasets/scenarionet_ecp_train
-val_data_path: [ "/home/erik/ssd2/datasets/scenarionet_ecp_val" ] # list of paths to the validation data VOD: /home/erik/raid/datasets/vod/scenarionet_vod_val NUSC: /home/erik/ssd2/datasets/scenarionet_nusc_val VOD Pose: /home/erik/raid/datasets/vod/scenarionet_vod_val_with_poses nuScenes: /home/erik/ssd2/datasets/scenarionet_nusc_val_1_8 ECP: /home/erik/ssd2/datasets/scenarionet_ecp_val
+train_data_path: [ "/home/erik/ssd2/datasets/scenarionet_ecp_poses_train"] # list of paths to the training data VOD: /home/erik/raid/datasets/vod/scenarionet_vod_train NUSC: /home/erik/ssd2/datasets/scenarionet_nusc_train VOD Pose: /home/erik/raid/datasets/vod/scenarionet_vod_train_with_poses nuScenes: /home/erik/ssd2/datasets/scenarionet_nusc_train_1_8 ECP: /home/erik/ssd2/datasets/scenarionet_ecp_train
+val_data_path: [ "/home/erik/ssd2/datasets/scenarionet_ecp_poses_val" ] # list of paths to the validation data VOD: /home/erik/raid/datasets/vod/scenarionet_vod_val NUSC: /home/erik/ssd2/datasets/scenarionet_nusc_val VOD Pose: /home/erik/raid/datasets/vod/scenarionet_vod_val_with_poses nuScenes: /home/erik/ssd2/datasets/scenarionet_nusc_val_1_8 ECP: /home/erik/ssd2/datasets/scenarionet_ecp_val
 max_data_num: [ 10000000] # maximum number of data for each training dataset
 starting_frame: [ 0] # history trajectory starts at this frame for each training dataset
 past_len: 10 #11 # history trajectory length, 2.1s #VOD: 6 NUSC: 21 AV2: 20 ECP: 10
@@ -19,7 +19,7 @@ masked_attributes: [] #[ 'z_axis', 'size' ] # attributes to be masked in the inp
 trajectory_sample_interval: 1 # sample interval for the trajectory
 only_train_on_ego: False # only train on AV
 center_offset_of_map: [ 30.0, 0.0 ] # center offset of the map
-use_cache: True # use cache for data loading
+use_cache: False # use cache for data loading
 overwrite_cache: True # overwrite existing cache
 store_data_in_memory: False # store data in memory
 

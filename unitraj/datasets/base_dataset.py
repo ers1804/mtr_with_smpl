@@ -184,11 +184,19 @@ class BaseDataset(Dataset):
         trajectory_sample_interval = self.config['trajectory_sample_interval']
         frequency_mask = generate_mask(past_length - 1, total_steps, trajectory_sample_interval)
 
-        track_infos = {
-            'object_id': [],  # {0: unset, 1: vehicle, 2: pedestrian, 3: cyclist, 4: others}
-            'object_type': [],
-            'trajs': []
-        }
+        if self.use_poses:
+            track_infos = {
+                'object_id': [],  # {0: unset, 1: vehicle, 2: pedestrian, 3: cyclist, 4: others}
+                'object_type': [],
+                'trajs': [],
+                'poses': []
+            }
+        else:
+            track_infos = {
+                'object_id': [],  # {0: unset, 1: vehicle, 2: pedestrian, 3: cyclist, 4: others}
+                'object_type': [],
+                'trajs': []
+            }
 
 
 
@@ -207,13 +215,24 @@ class BaseDataset(Dataset):
                 all_state = np.pad(all_state, ((ending_fame - all_state.shape[0], 0), (0, 0)))
             all_state = all_state[starting_fame:ending_fame]
 
+            if self.use_poses:
+                pose_state = state['poses'].reshape(-1, 17, 3)
+                if pose_state.shape[0] < ending_fame:
+                    pose_state = np.pad(pose_state, ((ending_fame - pose_state.shape[0], 0), (0, 0, 0)))
+                pose_state = pose_state[starting_fame:ending_fame]
             assert all_state.shape[0] == total_steps, f'Error: {all_state.shape[0]} != {total_steps}'
+            if self.use_poses:
+                assert pose_state.shape[0] == total_steps, f'Error: {pose_state.shape[0]} != {total_steps}'
 
             track_infos['object_id'].append(k)
             track_infos['object_type'].append(object_type[v['type']])
             track_infos['trajs'].append(all_state)
+            if self.use_poses:
+                track_infos['poses'].append(pose_state)
 
         track_infos['trajs'] = np.stack(track_infos['trajs'], axis=0)
+        if self.use_poses:
+            track_infos['poses'] = np.stack(track_infos['poses'], axis=0)
         # scenario['metadata']['ts'] = scenario['metadata']['ts'][::sample_inverval]
         track_infos['trajs'][..., -1] *= frequency_mask[np.newaxis]
         scenario['metadata']['ts'] = scenario['metadata']['ts'][:total_steps]
@@ -332,43 +351,43 @@ class BaseDataset(Dataset):
         }
 
         # Add pose data from TokenHMR
-        if self.use_poses:
-            if 'pose_sequence' in scenario['metadata'].keys():
-                pose_sequence = scenario['metadata'].pop('pose_sequence')
-                global_orientation = []
-                body_pose = []
-                beta = []
-                keypoints_3d = []
-                keypoints_2d = []
-                sequence_mask = []
-                for pose in pose_sequence:
-                    if 'pred_smpl_params' in pose.keys():
-                        global_orientation.append(pose['pred_smpl_params']['global_orient'])
-                        body_pose.append(pose['pred_smpl_params']['body_pose'])
-                        beta.append(pose['pred_smpl_params']['betas'])
-                        keypoints_3d.append(pose['pred_keypoints_3d'])
-                        keypoints_2d.append(pose['pred_keypoints_2d'])
-                        sequence_mask.append(1)
-                    else:
-                        global_orientation.append(np.zeros((1, 1, 3, 3)))
-                        body_pose.append(np.zeros((1, 23, 3, 3)))
-                        beta.append(np.zeros((1, 10)))
-                        keypoints_3d.append(np.zeros((1, 44, 3)))
-                        keypoints_2d.append(np.zeros((1, 44, 2)))
-                        sequence_mask.append(0)
-                ret['global_orientation'] = np.concatenate(global_orientation, axis=0)[np.newaxis, ...]
-                ret['body_pose'] = np.concatenate(body_pose, axis=0)[np.newaxis, ...]
-                ret['beta'] = np.concatenate(beta, axis=0)[np.newaxis, ...]
-                ret['keypoints_3d'] = np.concatenate(keypoints_3d, axis=0)[np.newaxis, ...]
-                ret['keypoints_2d'] = np.concatenate(keypoints_2d, axis=0)[np.newaxis, ...]
-                ret['sequence_mask'] = np.array(sequence_mask)[np.newaxis, ...]
-            else:
-                ret['global_orientation'] = np.zeros((1, 6, 1, 3, 3))
-                ret['body_pose'] = np.zeros((1, 6, 23, 3, 3))
-                ret['beta'] = np.zeros((1, 6, 10))
-                ret['keypoints_3d'] = np.zeros((1, 6, 44, 3))
-                ret['keypoints_2d'] = np.zeros((1, 6, 44, 2))
-                ret['sequence_mask'] = np.zeros((1, 6))
+        # if self.use_poses:
+        #     if 'pose_sequence' in scenario['metadata'].keys():
+        #         pose_sequence = scenario['metadata'].pop('pose_sequence')
+        #         global_orientation = []
+        #         body_pose = []
+        #         beta = []
+        #         keypoints_3d = []
+        #         keypoints_2d = []
+        #         sequence_mask = []
+        #         for pose in pose_sequence:
+        #             if 'pred_smpl_params' in pose.keys():
+        #                 global_orientation.append(pose['pred_smpl_params']['global_orient'])
+        #                 body_pose.append(pose['pred_smpl_params']['body_pose'])
+        #                 beta.append(pose['pred_smpl_params']['betas'])
+        #                 keypoints_3d.append(pose['pred_keypoints_3d'])
+        #                 keypoints_2d.append(pose['pred_keypoints_2d'])
+        #                 sequence_mask.append(1)
+        #             else:
+        #                 global_orientation.append(np.zeros((1, 1, 3, 3)))
+        #                 body_pose.append(np.zeros((1, 23, 3, 3)))
+        #                 beta.append(np.zeros((1, 10)))
+        #                 keypoints_3d.append(np.zeros((1, 44, 3)))
+        #                 keypoints_2d.append(np.zeros((1, 44, 2)))
+        #                 sequence_mask.append(0)
+        #         ret['global_orientation'] = np.concatenate(global_orientation, axis=0)[np.newaxis, ...]
+        #         ret['body_pose'] = np.concatenate(body_pose, axis=0)[np.newaxis, ...]
+        #         ret['beta'] = np.concatenate(beta, axis=0)[np.newaxis, ...]
+        #         ret['keypoints_3d'] = np.concatenate(keypoints_3d, axis=0)[np.newaxis, ...]
+        #         ret['keypoints_2d'] = np.concatenate(keypoints_2d, axis=0)[np.newaxis, ...]
+        #         ret['sequence_mask'] = np.array(sequence_mask)[np.newaxis, ...]
+        #     else:
+        #         ret['global_orientation'] = np.zeros((1, 6, 1, 3, 3))
+        #         ret['body_pose'] = np.zeros((1, 6, 23, 3, 3))
+        #         ret['beta'] = np.zeros((1, 6, 10))
+        #         ret['keypoints_3d'] = np.zeros((1, 6, 44, 3))
+        #         ret['keypoints_2d'] = np.zeros((1, 6, 44, 2))
+        #         ret['sequence_mask'] = np.zeros((1, 6))
 
         ret.update(scenario['metadata'])
         ret['timestamps_seconds'] = ret.pop('ts')
@@ -424,15 +443,32 @@ class BaseDataset(Dataset):
         track_index_to_predict = np.array(info['tracks_to_predict']['track_index'])
         obj_types = np.array(track_infos['object_type'])
         obj_trajs_full = track_infos['trajs']  # (num_objects, num_timestamp, 10)
+        if self.use_poses:
+            poses_full = track_infos['poses']
+        else:
+            poses_full = None
         obj_trajs_past = obj_trajs_full[:, :current_time_index + 1]
+        if self.use_poses:
+            poses_past = poses_full[:, :current_time_index + 1]
+        else:
+            poses_past = None
         obj_trajs_future = obj_trajs_full[:, current_time_index + 1:]
-
-        center_objects, track_index_to_predict = self.get_interested_agents(
-            track_index_to_predict=track_index_to_predict,
-            obj_trajs_full=obj_trajs_full,
-            current_time_index=current_time_index,
-            obj_types=obj_types, scene_id=scene_id
-        )
+        if self.use_poses:
+            center_objects, center_objects_pose, track_index_to_predict = self.get_interested_agents_with_pose(
+                track_index_to_predict=track_index_to_predict,
+                obj_trajs_full=obj_trajs_full,
+                current_time_index=current_time_index,
+                obj_types=obj_types, scene_id=scene_id,
+                poses_full=poses_full
+            )
+        else:
+            center_objects, track_index_to_predict = self.get_interested_agents(
+                track_index_to_predict=track_index_to_predict,
+                obj_trajs_full=obj_trajs_full,
+                current_time_index=current_time_index,
+                obj_types=obj_types, scene_id=scene_id
+            )
+            center_objects_pose = None
         if center_objects is None: return None
 
         sample_num = center_objects.shape[0]
@@ -440,10 +476,10 @@ class BaseDataset(Dataset):
         (obj_trajs_data, obj_trajs_mask, obj_trajs_pos, obj_trajs_last_pos, obj_trajs_future_state,
          obj_trajs_future_mask, center_gt_trajs,
          center_gt_trajs_mask, center_gt_final_valid_idx,
-         track_index_to_predict_new) = self.get_agent_data(
+         track_index_to_predict_new, obj_poses, valid_pose_mask) = self.get_agent_data(
             center_objects=center_objects, obj_trajs_past=obj_trajs_past, obj_trajs_future=obj_trajs_future,
             track_index_to_predict=track_index_to_predict, sdc_track_index=sdc_track_index,
-            timestamps=timestamps, obj_types=obj_types
+            timestamps=timestamps, obj_types=obj_types, center_objects_pose=center_objects_pose, poses_full=poses_full
         )
 
         ret_dict = {
@@ -468,12 +504,14 @@ class BaseDataset(Dataset):
         }
 
         if self.use_poses:
-            ret_dict['global_orientation'] = info['global_orientation']
-            ret_dict['body_pose'] = info['body_pose']
-            ret_dict['beta'] = info['beta']
-            ret_dict['keypoints_3d'] = info['keypoints_3d']
-            ret_dict['keypoints_2d'] = info['keypoints_2d']
-            ret_dict['sequence_mask'] = info['sequence_mask']
+            # ret_dict['global_orientation'] = info['global_orientation']
+            # ret_dict['body_pose'] = info['body_pose']
+            # ret_dict['beta'] = info['beta']
+            # ret_dict['keypoints_3d'] = info['keypoints_3d']
+            # ret_dict['keypoints_2d'] = info['keypoints_2d']
+            # ret_dict['sequence_mask'] = info['sequence_mask']
+            ret_dict['obj_poses'] = obj_poses
+            ret_dict['valid_pose_mask'] = valid_pose_mask
 
         if info['map_infos']['all_polylines'].__len__() == 0:
             info['map_infos']['all_polylines'] = np.zeros((2, 7), dtype=np.float32)
@@ -583,7 +621,7 @@ class BaseDataset(Dataset):
 
     def get_agent_data(
             self, center_objects, obj_trajs_past, obj_trajs_future, track_index_to_predict, sdc_track_index, timestamps,
-            obj_types
+            obj_types, center_objects_pose=None, poses_full=None
     ):
 
         num_center_objects = center_objects.shape[0]
@@ -593,8 +631,13 @@ class BaseDataset(Dataset):
             center_xyz=center_objects[:, 0:3],
             center_heading=center_objects[:, 6],
             heading_index=6, rot_vel_index=[7, 8]
-        )
-
+        ) # [num_center_objects, num_objects, num_timestamps, features]
+        if poses_full is not None:
+            obj_poses = poses_full[:, :num_timestamps, :, :]
+            obj_poses = obj_poses[None, :, :, :, :].repeat(num_center_objects, axis=0)
+            valid_pose_mask = np.all(obj_poses[:, :, :, 1:, :], axis=(-1, -2))
+        else:
+            obj_poses = None
         object_onehot_mask = np.zeros((num_center_objects, num_objects, num_timestamps, 5))
         object_onehot_mask[:, obj_types == 1, :, 0] = 1
         object_onehot_mask[:, obj_types == 2, :, 1] = 1
@@ -631,7 +674,7 @@ class BaseDataset(Dataset):
             object_heading_embedding,
             obj_trajs[:, :, :, 7:9],
             acce,
-        ], axis=-1)
+        ], axis=-1) # [num_center_objects, num_objects, num_timestamps, features]
 
         obj_trajs_mask = obj_trajs[:, :, :, -1]
         obj_trajs_data[obj_trajs_mask == 0] = 0
@@ -688,6 +731,9 @@ class BaseDataset(Dataset):
         obj_trajs_future_state = np.take_along_axis(obj_trajs_future_state, topk_idxs, axis=1)
         obj_trajs_future_mask = np.take_along_axis(obj_trajs_future_mask, topk_idxs[..., 0], axis=1)
         track_index_to_predict_new = np.zeros(len(track_index_to_predict), dtype=np.int64)
+        if self.use_poses:
+            obj_poses = np.take_along_axis(obj_poses.reshape(obj_poses.shape[0], obj_poses.shape[1], obj_poses.shape[2], -1), topk_idxs, axis=1).reshape(obj_poses.shape[0], -1, obj_poses.shape[2], 17, 3)
+            valid_pose_mask = np.take_along_axis(valid_pose_mask, topk_idxs[..., 0], axis=1)
 
         obj_trajs_data = np.pad(obj_trajs_data, ((0, 0), (0, max_num_agents - obj_trajs_data.shape[1]), (0, 0), (0, 0)))
         obj_trajs_mask = np.pad(obj_trajs_mask, ((0, 0), (0, max_num_agents - obj_trajs_mask.shape[1]), (0, 0)))
@@ -698,11 +744,16 @@ class BaseDataset(Dataset):
                                         ((0, 0), (0, max_num_agents - obj_trajs_future_state.shape[1]), (0, 0), (0, 0)))
         obj_trajs_future_mask = np.pad(obj_trajs_future_mask,
                                        ((0, 0), (0, max_num_agents - obj_trajs_future_mask.shape[1]), (0, 0)))
-
+        if self.use_poses:
+            obj_poses = np.pad(obj_poses, ((0, 0), (0, max_num_agents - obj_poses.shape[1]), (0, 0), (0, 0), (0, 0)))
+            valid_pose_mask = np.pad(valid_pose_mask, ((0, 0), (0, max_num_agents - valid_pose_mask.shape[1]), (0, 0)))
+        else:
+            obj_poses = None
+            valid_pose_mask = None
         return (obj_trajs_data, obj_trajs_mask.astype(bool), obj_trajs_pos, obj_trajs_last_pos,
                 obj_trajs_future_state, obj_trajs_future_mask, center_gt_trajs, center_gt_trajs_mask,
                 center_gt_final_valid_idx,
-                track_index_to_predict_new)
+                track_index_to_predict_new, obj_poses, valid_pose_mask)
 
     def get_interested_agents(self, track_index_to_predict, obj_trajs_full, current_time_index, obj_types, scene_id):
         center_objects_list = []
@@ -726,6 +777,34 @@ class BaseDataset(Dataset):
         center_objects = np.stack(center_objects_list, axis=0)  # (num_center_objects, num_attrs)
         track_index_to_predict = np.array(track_index_to_predict_selected)
         return center_objects, track_index_to_predict
+    
+
+    def get_interested_agents_with_pose(self, track_index_to_predict, obj_trajs_full, current_time_index, obj_types, scene_id, poses_full):
+        center_objects_list = []
+        center_objects_pose_list = []
+        track_index_to_predict_selected = []
+        selected_type = self.config['object_type']
+        selected_type = [object_type[x] for x in selected_type]
+        for k in range(len(track_index_to_predict)):
+            obj_idx = track_index_to_predict[k]
+
+            if obj_trajs_full[obj_idx, current_time_index, -1] == 0:
+                print(f'Warning: obj_idx={obj_idx} is not valid at time step {current_time_index}, scene_id={scene_id}')
+                continue
+            if obj_types[obj_idx] not in selected_type:
+                continue
+
+            center_objects_list.append(obj_trajs_full[obj_idx, current_time_index])
+            center_objects_pose_list.append(poses_full[obj_idx, current_time_index])
+            track_index_to_predict_selected.append(obj_idx)
+        if len(center_objects_list) == 0:
+            print(f'Warning: no center objects at time step {current_time_index}, scene_id={scene_id}')
+            return None, []
+        center_objects = np.stack(center_objects_list, axis=0)  # (num_center_objects, num_attrs)
+        center_objects_pose = np.stack(center_objects_pose_list, axis=0)  # (num_center_objects, num_attrs)
+        track_index_to_predict = np.array(track_index_to_predict_selected)
+        return center_objects, center_objects_pose, track_index_to_predict
+    
 
     def transform_trajs_to_center_coords(self, obj_trajs, center_xyz, center_heading, heading_index,
                                          rot_vel_index=None):
